@@ -35,11 +35,15 @@ class CompileView(APIView):
         Level 1: Spawns the local tectonic executable to compile LaTeX to PDF.
         """
         # Define compiler executable path
-        compiler_path = os.path.join(settings.BASE_DIR, "tectonic.exe")
+        # Detect platform dynamically to support Windows (local) and Linux (Render production)
+        import platform
+        is_windows = platform.system() == "Windows"
+        binary_name = "tectonic.exe" if is_windows else "tectonic"
+        compiler_path = os.path.join(settings.BASE_DIR, binary_name)
         
         if not os.path.exists(compiler_path):
             return Response(
-                {"error": "Tectonic LaTeX compiler executable not found in backend directory."},
+                {"error": f"Tectonic compiler binary '{binary_name}' not found in backend directory."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
             

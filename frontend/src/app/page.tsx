@@ -71,6 +71,8 @@ Class XII & Lucknow Public College, Lucknow & 96.8\\% & 2021 \\\\
 \\end{document}
 `;
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface SavedDoc {
   _id: string;
   title: string;
@@ -136,7 +138,7 @@ export default function EditorPage() {
 
   const fetchUserProfile = async (authToken: string) => {
     try {
-      const response = await fetch('http://localhost:8000/api/auth/me/', {
+      const response = await fetch(`${API_BASE_URL}/api/auth/me/`, {
         headers: { 'Authorization': `Token ${authToken}` },
       });
       if (response.ok) {
@@ -153,7 +155,7 @@ export default function EditorPage() {
 
   const fetchUserDocuments = async (authToken: string) => {
     try {
-      const response = await fetch('http://localhost:8000/api/documents/', {
+      const response = await fetch(`${API_BASE_URL}/api/documents/`, {
         headers: { 'Authorization': `Token ${authToken}` },
       });
       if (response.ok) {
@@ -174,7 +176,7 @@ export default function EditorPage() {
       : { username: authUsername, email: authEmail, password: authPassword };
 
     try {
-      const response = await fetch(`http://localhost:8000/api/auth/${endpoint}`, {
+      const response = await fetch(`${API_BASE_URL}/api/auth/${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -199,7 +201,7 @@ export default function EditorPage() {
   const handleLogout = async () => {
     if (token) {
       try {
-        await fetch('http://localhost:8000/api/auth/logout/', {
+        await fetch(`${API_BASE_URL}/api/auth/logout/`, {
           method: 'POST',
           headers: { 'Authorization': `Token ${token}` },
         });
@@ -238,7 +240,7 @@ export default function EditorPage() {
 
     // Otherwise, perform direct update
     try {
-      const response = await fetch(`http://localhost:8000/api/documents/${activeDocId}/`, {
+      const response = await fetch(`${API_BASE_URL}/api/documents/${activeDocId}/`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -261,7 +263,7 @@ export default function EditorPage() {
     e.preventDefault();
     if (!token) return;
     try {
-      const response = await fetch('http://localhost:8000/api/documents/', {
+      const response = await fetch(`${API_BASE_URL}/api/documents/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -286,7 +288,7 @@ export default function EditorPage() {
   const loadDocument = async (docId: string) => {
     if (!token) return;
     try {
-      const response = await fetch(`http://localhost:8000/api/documents/${docId}/`, {
+      const response = await fetch(`${API_BASE_URL}/api/documents/${docId}/`, {
         headers: { 'Authorization': `Token ${token}` }
       });
       if (response.ok) {
@@ -307,7 +309,7 @@ export default function EditorPage() {
     setActiveMode(mode);
     
     try {
-      const response = await fetch(`http://localhost:8000/api/compile/?mode=${mode}`, {
+      const response = await fetch(`${API_BASE_URL}/api/compile/?mode=${mode}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -333,7 +335,7 @@ export default function EditorPage() {
       const fileUrl = URL.createObjectURL(blob);
       setPdfUrl(fileUrl);
     } catch (err) {
-      setErrorLog('Failed to connect to the compilation server. Please ensure the Django backend is running at http://localhost:8000/.');
+      setErrorLog(`Failed to connect to the compilation server. Please ensure the Django backend is running at ${API_BASE_URL}.`);
       setPdfUrl(null);
       setPdfBlob(null);
     } finally {
