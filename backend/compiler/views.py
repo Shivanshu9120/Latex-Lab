@@ -34,73 +34,108 @@ class CompileView(APIView):
         """
         Level 1: Spawns the local tectonic executable to compile LaTeX to PDF.
         """
-        # Define compiler executable path
-        # Detect platform dynamically to support Windows (local) and Linux (Render production)
-        import platform
-        is_windows = platform.system() == "Windows"
-        binary_name = "tectonic.exe" if is_windows else "tectonic"
-        compiler_path = os.path.join(settings.BASE_DIR, binary_name)
+        import traceback
+        import shutil
         
-        if not os.path.exists(compiler_path):
-            return Response(
-                {"error": f"Tectonic compiler binary '{binary_name}' not found in backend directory."},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+        try:
+            # Define compiler executable path
+            # Detect platform dynamically to support Windows (local) and Linux (Render production)
+            import platform
+            is_windows = platform.system() == "Windows"
+            binary_name = "tectonic.exe" if is_windows else "tectonic"
             
-        # Create an isolated temporary workspace directory
-        with tempfile.TemporaryDirectory() as temp_dir:
-            tex_file_path = os.path.join(temp_dir, "document.tex")
-            pdf_file_path = os.path.join(temp_dir, "document.pdf")
+            # Check settings.BASE_DIR, and also try parent if BASE_DIR/binary_name doesn't exist
+            compiler_path = os.path.join(settings.BASE_DIR, binary_name)
+            if not os.path.exists(compiler_path):
+                # Fallback to repo root parent directory if settings.BASE_DIR is backend
+                fallback_path = os.path.join(settings.BASE_DIR.parent, binary_name)
+                if os.path.exists(fallback_path):
+                    compiler_path = fallback_path
             
-            # Write the user code to document.tex
-            with open(tex_file_path, "w", encoding="utf-8") as f:
-                f.write(code)
-                
-            try:
-                # Execute Tectonic compiler CLI in temp directory
-                result = subprocess.run(
-                    [compiler_path, tex_file_path, "-o", temp_dir],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=35, # Ensure long runs terminate
-                    text=True
-                )
-                
-                # If exit code is not 0, compilation failed
-                if result.returncode != 0:
-                    error_log = result.stderr if result.stderr.strip() else result.stdout
-                    return Response(
-                        {
-                            "error": "LaTeX compilation failed.",
-                            "log": error_log
-                        },
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                    
-                # Read the generated PDF and stream it
-                if os.path.exists(pdf_file_path):
-                    with open(pdf_file_path, "rb") as pdf_file:
-                        pdf_data = pdf_file.read()
-                    
-                    response = HttpResponse(pdf_data, content_type="application/pdf")
-                    response['Content-Disposition'] = 'inline; filename="document.pdf"'
-                    return response
-                else:
-                    return Response(
-                        {"error": "Compilation succeeded but PDF file was not generated."},
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                    )
-                    
-            except subprocess.TimeoutExpired:
+            if not os.path.exists(compiler_path):
                 return Response(
-                    {"error": "LaTeX compilation timed out (limit: 35 seconds)."},
-                    status=status.HTTP_504_GATEWAY_TIMEOUT
-                )
-            except Exception as e:
-                return Response(
-                    {"error": f"Internal compilation error: {str(e)}"},
+                    {
+                        "error": f"Tectonic compiler binary '{binary_name}' not found in backend directory.",
+                        "details": f"Checked paths: {os.path.join(settings.BASE_DIR, binary_name)} and {os.path.join(settings.BASE_DIR.parent, binary_name) if hasattr(settings.BASE_DIR, 'parent') else 'none'}"
+                    },
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
+                
+            # Create an isolated temporary workspace directory manually to avoid context manager cleanup failures
+            temp_dir = tempfile.mkdtemp()
+            try:
+                tex_file_path = os.path.join(temp_dir, "document.tex")
+                pdf_file_path = os.path.join(temp_dir, "document.pdf")
+                
+                # Write the user code to document.tex
+                with open(tex_file_path, "w", encoding="utf-8") as f:
+                    f.write(code)
+                    
+                try:
+                    # Execute Tectonic compiler CLI in temp directory
+                    # Set custom cache directory inside /tmp to ensure permissions and persist cache across requests
+                    env = os.environ.copy()
+                    env["TECTONIC_CACHE_DIR"] = os.path.join(tempfile.gettempdir(), "tectonic_cache")
+                    
+                    result = subprocess.run(
+                        [compiler_path, tex_file_path, "-o", temp_dir],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=35, # Ensure long runs terminate
+                        text=True,
+                        env=env
+                    )
+                    
+                    # If exit code is not 0, compilation failed
+                    if result.returncode != 0:
+                        error_log = result.stderr if result.stderr.strip() else result.stdout
+                        return Response(
+                            {
+                                "error": "LaTeX compilation failed.",
+                                "log": error_log
+                            },
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                        
+                    # Read the generated PDF and stream it
+                    if os.path.exists(pdf_file_path):
+                        with open(pdf_file_path, "rb") as pdf_file:
+                            pdf_data = pdf_file.read()
+                        
+                        response = HttpResponse(pdf_data, content_type="application/pdf")
+                        response['Content-Disposition'] = 'inline; filename="document.pdf"'
+                        return response
+                    else:
+                        return Response(
+                            {"error": "Compilation succeeded but PDF file was not generated."},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                        )
+                        
+                except subprocess.TimeoutExpired:
+                    return Response(
+                        {"error": "LaTeX compilation timed out (limit: 35 seconds)."},
+                        status=status.HTTP_504_GATEWAY_TIMEOUT
+                    )
+                except Exception as e:
+                    return Response(
+                        {"error": f"Internal subprocess execution error: {str(e)}"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+            finally:
+                # Ignore clean-up errors to prevent crashing the response
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                
+        except Exception as e:
+            # Catch any other unexpected exceptions (e.g. tempfile creation failure)
+            # Log traceback to console (Render stdout/stderr)
+            traceback.print_exc()
+            return Response(
+                {
+                    "error": f"Internal compiler view crash: {str(e)}",
+                    "traceback": traceback.format_exc()
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
                 
     def compile_level2(self, code):
         """
